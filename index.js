@@ -36,7 +36,7 @@ app.post("/bookings", async (req, res) => {
     // const newBooking = req.body;
     newBooking.formFilingDateTime = Date.now();
     await newBooking.save();
-    console.log("BOOKED");
+    // console.log("BOOKED");
     res.status(201).json(newBooking);
   } catch (error) {
     res.status(400).json({ error: error.message });
