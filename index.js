@@ -22,6 +22,18 @@ const bookingSchema = new mongoose.Schema({
 
 const Booking = mongoose.model("Booking", bookingSchema);
 
+const BOOKING_PASSWORD = "secret123"; // Store securely in .env in production
+
+app.post("/api/verify-booking-password", (req, res) => {
+  const { password } = req.body;
+  if (password === BOOKING_PASSWORD) {
+    return res.json({ success: true });
+  } else {
+    return res
+      .status(401)
+      .json({ success: false, message: "Invalid password" });
+  }
+});
 // Create
 app.post("/bookings", async (req, res) => {
   try {
