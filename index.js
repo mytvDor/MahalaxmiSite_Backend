@@ -4,10 +4,23 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const dns = require("dns");
 
+
+dns.setServers([
+  '1.1.1.1',
+  '8.8.8.8'
+])
 const app = express();
 
 app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 app.use(express.json());
 
 // --------------------------------------------------
@@ -15,7 +28,7 @@ app.use(express.json());
 // --------------------------------------------------
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGODB_URI)
   .then(() => console.log("MongoDB Connected"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
@@ -57,18 +70,176 @@ const Booking = mongoose.model("Booking", bookingSchema);
 const BOOKING_PASSWORD =
   process.env.BOOKING_PASSWORD || "secret123";
 
+
+// --------------------------------------------------
+// MongoDB Connection + Detailed Debug Logs
+// --------------------------------------------------
+
+let mongoConnectionError = null;
+let mongoConnectionPromise = null;
+
+function connectDB() {
+  console.log("[DB] connectDB called", {
+    timestamp: new Date().toISOString(),
+    readyState: mongoose.connection.readyState,
+    uriConfigured: Boolean(process.env.MONGODB_URI),
+    vercel: Boolean(process.env.VERCEL),
+  });
+
+  if (mongoose.connection.readyState === 1) {
+    console.log("[DB] Already connected");
+    return Promise.resolve(mongoose.connection);
+  }
+
+  if (!process.env.MONGODB_URI) {
+    const error = new Error("MONGODB_URI is missing");
+    mongoConnectionError = error.message;
+    console.error("[DB] Configuration error:", error.message);
+    return Promise.reject(error);
+  }
+
+  if (!mongoConnectionPromise) {
+    console.log("[DB] Starting MongoDB connection...");
+
+    mongoConnectionPromise = mongoose
+      .connect(process.env.MONGODB_URI, {
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 10000,
+        maxPoolSize: 5,
+      })
+      .then(() => {
+        mongoConnectionError = null;
+
+        console.log("[DB] CONNECTED SUCCESSFULLY", {
+          host: mongoose.connection.host,
+          database: mongoose.connection.name,
+          readyState: mongoose.connection.readyState,
+          timestamp: new Date().toISOString(),
+        });
+
+        return mongoose.connection;
+      })
+      .catch((error) => {
+        mongoConnectionError = error.message;
+        mongoConnectionPromise = null;
+
+        console.error("[DB] CONNECTION FAILED", {
+          name: error.name,
+          message: error.message,
+          code: error.code,
+          codeName: error.codeName,
+          cause: error.cause
+            ? {
+                name: error.cause.name,
+                message: error.cause.message,
+                code: error.cause.code,
+              }
+            : null,
+          readyState: mongoose.connection.readyState,
+          timestamp: new Date().toISOString(),
+        });
+
+        throw error;
+      });
+  }
+
+  return mongoConnectionPromise;
+}
+
+// Connection lifecycle events
+mongoose.connection.on("connected", () => {
+  console.log("[DB EVENT] connected");
+});
+
+mongoose.connection.on("open", () => {
+  console.log("[DB EVENT] open");
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.error("[DB EVENT] disconnected");
+  mongoConnectionPromise = null;
+});
+
+mongoose.connection.on("reconnected", () => {
+  console.log("[DB EVENT] reconnected");
+});
+
+mongoose.connection.on("error", (error) => {
+  mongoConnectionError = error.message;
+
+  console.error("[DB EVENT] error", {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+  });
+});
+
+// Start initial connection without blocking server startup.
+connectDB().catch((error) => {
+  console.error("[DB STARTUP] Initial connection failed:", error.message);
+});
+
+
 // --------------------------------------------------
 // Health Check
 // --------------------------------------------------
 
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Server is awake and running right",
+
+// --------------------------------------------------
+// Detailed Health Check
+// --------------------------------------------------
+
+app.get("/health", async (req, res) => {
+  const startedAt = Date.now();
+
+  console.log("[HEALTH] Request received", {
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
+    method: req.method,
+    path: req.originalUrl,
+    readyState: mongoose.connection.readyState,
   });
+
+  try {
+    await connectDB();
+
+    // Test an actual database operation.
+    await mongoose.connection.db.admin().ping();
+
+    const result = {
+      success: true,
+      server: "running",
+      database: "connected",
+      readyState: mongoose.connection.readyState,
+      host: mongoose.connection.host,
+      databaseName: mongoose.connection.name,
+      ping: "successful",
+      durationMs: Date.now() - startedAt,
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log("[HEALTH] SUCCESS", result);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    const result = {
+      success: false,
+      server: "running",
+      database: "unavailable",
+      readyState: mongoose.connection.readyState,
+      error: error.message,
+      errorName: error.name,
+      errorCode: error.code || null,
+      lastConnectionError: mongoConnectionError,
+      durationMs: Date.now() - startedAt,
+      timestamp: new Date().toISOString(),
+    };
+
+    console.error("[HEALTH] FAILED", result);
+
+    return res.status(503).json(result);
+  }
 });
+
 
 // --------------------------------------------------
 // Verify Booking Password
