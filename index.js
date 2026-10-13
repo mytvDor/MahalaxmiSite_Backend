@@ -64,7 +64,7 @@ const BOOKING_PASSWORD =
 app.get("/health", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Server is awake and running",
+    message: "Server is awake and running right",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
   });
