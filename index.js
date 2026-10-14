@@ -263,6 +263,7 @@ app.post("/api/verify-booking-password", (req, res) => {
 // New bookings default to Pending.
 // --------------------------------------------------
 
+
 app.post("/bookings", async (req, res) => {
   try {
     const {
@@ -273,29 +274,55 @@ app.post("/bookings", async (req, res) => {
       time,
     } = req.body || {};
 
+    // Validate transaction ID
+    
+
+    const normalizedTransactionId = transactionId.trim();
+
+    // Check whether transaction ID already exists
+    const existingBooking = await Booking.findOne({
+      transactionId: normalizedTransactionId,
+    }).lean();
+
+    if (existingBooking) {
+      return res.status(409).json({
+        success: false,
+        duplicate: true,
+        message:
+          "This transaction ID has already been used for a booking. Please verify your payment details.",
+        transactionId: normalizedTransactionId,
+      });
+    }
+
+    // Create booking only if transaction ID is unique
     const newBooking = new Booking({
       name,
       phone,
       bookingDateTime,
-      transactionId,
+      transactionId: normalizedTransactionId,
       time,
       formFilingDateTime: Date.now(),
-      // isCompleted omitted intentionally.
-      // Mongoose defaults it to false.
+      // isCompleted defaults to false
     });
 
     await newBooking.save();
 
-    return res.status(201).json(newBooking);
+    return res.status(201).json({
+      success: true,
+      message: "Booking created successfully.",
+      booking: newBooking,
+    });
   } catch (error) {
     console.error("Create booking error:", error);
 
-    return res.status(400).json({
+    return res.status(500).json({
       success: false,
+      message: "Unable to create booking. Please try again.",
       error: error.message,
     });
   }
 });
+
 
 // --------------------------------------------------
 // Read All Bookings
